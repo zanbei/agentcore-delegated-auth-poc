@@ -1,0 +1,13 @@
+.env
+secrets.env
+*.secret
+*.out
+*.arn
+bg3lo-state.json
+cf.json
+cf-off.json
+jwks.json
+fn.zip
+__pycache__/
+node_modules/
+.DS_Store
