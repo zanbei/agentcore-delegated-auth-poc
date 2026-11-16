@@ -13,7 +13,7 @@ Status: private, experimental. Not production code.
 
 ## Architecture
 
-Orange = an AgentCore feature (the groups are the AgentCore services). Blue = external identity provider. Green = downstream. Red dashed = the trust-critical caller and the audit gap. ◆ = an AgentCore API call.
+Orange = an AgentCore feature; the thick orange path is OBO (the groups are the AgentCore services). Blue = external identity provider. Green = downstream. Red dashed = the trust-critical caller and the audit gap. ◆ = an AgentCore API call.
 
 **PoC 1: user present, OBO through the gateway**
 
@@ -21,21 +21,24 @@ Orange = an AgentCore feature (the groups are the AgentCore services). Blue = ex
 %%{init: {"flowchart": {"nodeSpacing": 18, "rankSpacing": 28, "padding": 8}, "themeVariables": {"fontSize": "13px"}}}%%
 flowchart LR
     U["User"] -->|"login, aud=agent-app"| C["Agent client<br/>(forwards the user token only)"]
-    C -->|"tools/call + user token"| G
+    C -->|"tools/call + user token<br/>aud=agent-app"| G
     subgraph AC["Amazon Bedrock AgentCore"]
-        G["Gateway<br/>• inbound CUSTOM_JWT authorizer<br/>• OpenAPI target"]
-        I["Identity<br/>• OAuth2 credential provider<br/>• OBO TOKEN_EXCHANGE · ◆ GetResourceOauth2Token"]
-        G -->|"outbound OAuth"| I
+        G["Gateway<br/>• inbound CUSTOM_JWT check<br/>• OpenAPI target, outbound OAuth"]
+        O["🔑 OBO token exchange (AgentCore Identity)<br/>credential provider: grantType TOKEN_EXCHANGE<br/>user token in → downstream token out<br/>◆ GetResourceOauth2Token"]
+        G ==>|"① request outbound token"| O
     end
-    I <-->|"RFC 8693 exchange"| K[("Keycloak<br/>external IdP, not AgentCore")]
-    G -->|"Bearer, aud=itsm-api"| D["Mock ITSM API<br/>(Lambda)"]
+    O <==>|"② RFC 8693<br/>subject_token = user token"| K[("Keycloak<br/>issues the new token<br/>external IdP, not AgentCore")]
+    G ==>|"③ Bearer, aud=itsm-api"| D["Mock ITSM API<br/>(Lambda)<br/>same sub: sees the real user<br/>returns only that user's data"]
+    linkStyle 2,3,4 stroke:#e65100,stroke-width:4px
     classDef agentcore fill:#fff7eb,stroke:#ff9900,stroke-width:2px,color:#0f1b2d
+    classDef obo fill:#ffe0b2,stroke:#e65100,stroke-width:4px,color:#0f1b2d
     classDef idp fill:#eef4ff,stroke:#2563eb,color:#0f1b2d
     classDef app fill:#ffffff,stroke:#94a3b8,color:#0f1b2d
     classDef down fill:#ecfdf3,stroke:#15803d,color:#0f1b2d
     classDef risk fill:#fff1f0,stroke:#b42318,stroke-dasharray:5 4,color:#0f1b2d
     style AC fill:#fff3e0,stroke:#ff9900,stroke-width:2px,color:#7a4a00
-    class G,I agentcore
+    class G agentcore
+    class O obo
     class K idp
     class U,C app
     class D down
@@ -48,7 +51,7 @@ flowchart LR
 flowchart LR
     APP["App (user present, once)<br/>task → user sub"] -->|"◆ ForUserId · ◆ GetResourceOauth2Token<br/>◆ CompleteResourceTokenAuth"| ID
     subgraph AC["Amazon Bedrock AgentCore"]
-        ID["Identity<br/>• 3LO credential provider<br/>• Workload identity<br/>• Token Vault (user × agent)"]
+        ID["Identity<br/>• 3LO credential provider (USER_FEDERATION)<br/>• Workload identity<br/>• Token Vault (user × agent)<br/><b>3LO here, no OBO: no exchange, no user token needed later</b>"]
     end
     B["User browser<br/>login + consent"] -->|"consent"| K[("Keycloak agent-bg<br/>external IdP, not AgentCore")]
     K -->|"auth code"| ID
@@ -57,6 +60,7 @@ flowchart LR
     ID -->|"access token"| S
     S -->|"lambda:Invoke + Bearer"| D["Mock ITSM API<br/>IAM-only"]
     classDef agentcore fill:#fff7eb,stroke:#ff9900,stroke-width:2px,color:#0f1b2d
+    classDef obo fill:#ffe0b2,stroke:#e65100,stroke-width:4px,color:#0f1b2d
     classDef idp fill:#eef4ff,stroke:#2563eb,color:#0f1b2d
     classDef app fill:#ffffff,stroke:#94a3b8,color:#0f1b2d
     classDef down fill:#ecfdf3,stroke:#15803d,color:#0f1b2d
@@ -68,6 +72,16 @@ flowchart LR
     class D down
     class S risk
 ```
+
+**Where OBO is.** OBO is the thick orange path in PoC 1 only: the gateway's outbound OAuth asks AgentCore Identity for a token (①), Identity exchanges the user's token at the IdP (RFC 8693, ②), and the downstream receives a token for itself that still carries the user's `sub` (③). It needs a live user token as `subject_token`, so it does not exist in PoC 2, where the user is absent. PoC 2 gets its token from a one-time consent (3LO) and the Token Vault instead.
+
+| | PoC 1 | PoC 2 |
+|---|---|---|
+| Flow | OBO token exchange | 3LO authorization code + Token Vault |
+| Credential provider | `obo-test-keycloak`, with an OBO config | `obo-test-bg-3lo`, no OBO config |
+| Needs a user token at call time | yes, every call | no |
+| Exchange per call | yes | no, the Vault serves a stored token and refreshes it |
+| `azp` the downstream sees | `agent-app` | `agent-bg` |
 
 AgentCore features used:
 

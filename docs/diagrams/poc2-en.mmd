@@ -2,7 +2,7 @@
 flowchart LR
     APP["App (user present, once)<br/>task → user sub"] -->|"◆ ForUserId · ◆ GetResourceOauth2Token<br/>◆ CompleteResourceTokenAuth"| ID
     subgraph AC["Amazon Bedrock AgentCore"]
-        ID["Identity<br/>• 3LO credential provider<br/>• Workload identity<br/>• Token Vault (user × agent)"]
+        ID["Identity<br/>• 3LO credential provider (USER_FEDERATION)<br/>• Workload identity<br/>• Token Vault (user × agent)<br/><b>3LO here, no OBO: no exchange, no user token needed later</b>"]
     end
     B["User browser<br/>login + consent"] -->|"consent"| K[("Keycloak agent-bg<br/>external IdP, not AgentCore")]
     K -->|"auth code"| ID
@@ -11,6 +11,7 @@ flowchart LR
     ID -->|"access token"| S
     S -->|"lambda:Invoke + Bearer"| D["Mock ITSM API<br/>IAM-only"]
     classDef agentcore fill:#fff7eb,stroke:#ff9900,stroke-width:2px,color:#0f1b2d
+    classDef obo fill:#ffe0b2,stroke:#e65100,stroke-width:4px,color:#0f1b2d
     classDef idp fill:#eef4ff,stroke:#2563eb,color:#0f1b2d
     classDef app fill:#ffffff,stroke:#94a3b8,color:#0f1b2d
     classDef down fill:#ecfdf3,stroke:#15803d,color:#0f1b2d

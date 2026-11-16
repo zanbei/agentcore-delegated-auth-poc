@@ -2,7 +2,7 @@
 flowchart LR
     APP["应用(用户在场,仅一次)<br/>任务 → 用户 sub"] -->|"◆ ForUserId · ◆ GetResourceOauth2Token<br/>◆ CompleteResourceTokenAuth"| ID
     subgraph AC["Amazon Bedrock AgentCore"]
-        ID["Identity<br/>• 3LO 凭据提供者<br/>• 工作负载身份<br/>• Token Vault(用户 × agent)"]
+        ID["Identity<br/>• 3LO 凭据提供者(USER_FEDERATION)<br/>• 工作负载身份<br/>• Token Vault(用户 × agent)<br/><b>这里是 3LO,不是 OBO:没有交换,之后也不需要用户令牌</b>"]
     end
     B["用户浏览器<br/>登录 + 同意"] -->|"同意"| K[("Keycloak agent-bg<br/>外部身份提供商,不属于 AgentCore")]
     K -->|"授权码"| ID
@@ -11,6 +11,7 @@ flowchart LR
     ID -->|"访问令牌"| S
     S -->|"lambda:Invoke + Bearer"| D["模拟 ITSM API<br/>仅 IAM 可调用"]
     classDef agentcore fill:#fff7eb,stroke:#ff9900,stroke-width:2px,color:#0f1b2d
+    classDef obo fill:#ffe0b2,stroke:#e65100,stroke-width:4px,color:#0f1b2d
     classDef idp fill:#eef4ff,stroke:#2563eb,color:#0f1b2d
     classDef app fill:#ffffff,stroke:#94a3b8,color:#0f1b2d
     classDef down fill:#ecfdf3,stroke:#15803d,color:#0f1b2d

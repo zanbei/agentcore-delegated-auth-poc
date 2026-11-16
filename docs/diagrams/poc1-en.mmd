@@ -1,21 +1,24 @@
 %%{init: {"flowchart": {"nodeSpacing": 18, "rankSpacing": 28, "padding": 8}, "themeVariables": {"fontSize": "13px"}}}%%
 flowchart LR
     U["User"] -->|"login, aud=agent-app"| C["Agent client<br/>(forwards the user token only)"]
-    C -->|"tools/call + user token"| G
+    C -->|"tools/call + user token<br/>aud=agent-app"| G
     subgraph AC["Amazon Bedrock AgentCore"]
-        G["Gateway<br/>• inbound CUSTOM_JWT authorizer<br/>• OpenAPI target"]
-        I["Identity<br/>• OAuth2 credential provider<br/>• OBO TOKEN_EXCHANGE · ◆ GetResourceOauth2Token"]
-        G -->|"outbound OAuth"| I
+        G["Gateway<br/>• inbound CUSTOM_JWT check<br/>• OpenAPI target, outbound OAuth"]
+        O["🔑 OBO token exchange (AgentCore Identity)<br/>credential provider: grantType TOKEN_EXCHANGE<br/>user token in → downstream token out<br/>◆ GetResourceOauth2Token"]
+        G ==>|"① request outbound token"| O
     end
-    I <-->|"RFC 8693 exchange"| K[("Keycloak<br/>external IdP, not AgentCore")]
-    G -->|"Bearer, aud=itsm-api"| D["Mock ITSM API<br/>(Lambda)"]
+    O <==>|"② RFC 8693<br/>subject_token = user token"| K[("Keycloak<br/>issues the new token<br/>external IdP, not AgentCore")]
+    G ==>|"③ Bearer, aud=itsm-api"| D["Mock ITSM API<br/>(Lambda)<br/>same sub: sees the real user<br/>returns only that user's data"]
+    linkStyle 2,3,4 stroke:#e65100,stroke-width:4px
     classDef agentcore fill:#fff7eb,stroke:#ff9900,stroke-width:2px,color:#0f1b2d
+    classDef obo fill:#ffe0b2,stroke:#e65100,stroke-width:4px,color:#0f1b2d
     classDef idp fill:#eef4ff,stroke:#2563eb,color:#0f1b2d
     classDef app fill:#ffffff,stroke:#94a3b8,color:#0f1b2d
     classDef down fill:#ecfdf3,stroke:#15803d,color:#0f1b2d
     classDef risk fill:#fff1f0,stroke:#b42318,stroke-dasharray:5 4,color:#0f1b2d
     style AC fill:#fff3e0,stroke:#ff9900,stroke-width:2px,color:#7a4a00
-    class G,I agentcore
+    class G agentcore
+    class O obo
     class K idp
     class U,C app
     class D down

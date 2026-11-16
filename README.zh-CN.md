@@ -13,7 +13,7 @@
 
 ## 架构
 
-橙色 = AgentCore 的功能(分组框就是 AgentCore 的服务)。蓝色 = 外部身份提供商。绿色 = 下游。红色虚线 = 信任关键的调用方和审计缺口。◆ = 对 AgentCore 的 API 调用。
+橙色 = AgentCore 的功能,橙色粗线是 OBO(分组框就是 AgentCore 的服务)。蓝色 = 外部身份提供商。绿色 = 下游。红色虚线 = 信任关键的调用方和审计缺口。◆ = 对 AgentCore 的 API 调用。
 
 **PoC 1:用户在场,经网关做 OBO**
 
@@ -21,21 +21,24 @@
 %%{init: {"flowchart": {"nodeSpacing": 18, "rankSpacing": 28, "padding": 8}, "themeVariables": {"fontSize": "13px"}}}%%
 flowchart LR
     U["用户"] -->|"登录,aud=agent-app"| C["Agent 客户端<br/>(只转发用户令牌)"]
-    C -->|"tools/call + 用户令牌"| G
+    C -->|"tools/call + 用户令牌<br/>aud=agent-app"| G
     subgraph AC["Amazon Bedrock AgentCore"]
-        G["Gateway<br/>• 入站 CUSTOM_JWT 校验<br/>• OpenAPI 目标"]
-        I["Identity<br/>• OAuth2 凭据提供者<br/>• OBO TOKEN_EXCHANGE · ◆ GetResourceOauth2Token"]
-        G -->|"出站 OAuth"| I
+        G["Gateway<br/>• 入站 CUSTOM_JWT 校验<br/>• OpenAPI 目标,出站 OAuth"]
+        O["🔑 OBO 令牌交换(AgentCore Identity)<br/>凭据提供者:grantType TOKEN_EXCHANGE<br/>输入用户令牌 → 输出下游令牌<br/>◆ GetResourceOauth2Token"]
+        G ==>|"① 请求出站令牌"| O
     end
-    I <-->|"RFC 8693 交换"| K[("Keycloak<br/>外部身份提供商,不属于 AgentCore")]
-    G -->|"Bearer,aud=itsm-api"| D["模拟 ITSM API<br/>(Lambda)"]
+    O <==>|"② RFC 8693<br/>subject_token = 用户令牌"| K[("Keycloak<br/>签发新令牌<br/>外部身份提供商,不属于 AgentCore")]
+    G ==>|"③ Bearer,aud=itsm-api"| D["模拟 ITSM API<br/>(Lambda)<br/>sub 不变:看到的是真实用户<br/>只返回该用户的数据"]
+    linkStyle 2,3,4 stroke:#e65100,stroke-width:4px
     classDef agentcore fill:#fff7eb,stroke:#ff9900,stroke-width:2px,color:#0f1b2d
+    classDef obo fill:#ffe0b2,stroke:#e65100,stroke-width:4px,color:#0f1b2d
     classDef idp fill:#eef4ff,stroke:#2563eb,color:#0f1b2d
     classDef app fill:#ffffff,stroke:#94a3b8,color:#0f1b2d
     classDef down fill:#ecfdf3,stroke:#15803d,color:#0f1b2d
     classDef risk fill:#fff1f0,stroke:#b42318,stroke-dasharray:5 4,color:#0f1b2d
     style AC fill:#fff3e0,stroke:#ff9900,stroke-width:2px,color:#7a4a00
-    class G,I agentcore
+    class G agentcore
+    class O obo
     class K idp
     class U,C app
     class D down
@@ -48,7 +51,7 @@ flowchart LR
 flowchart LR
     APP["应用(用户在场,仅一次)<br/>任务 → 用户 sub"] -->|"◆ ForUserId · ◆ GetResourceOauth2Token<br/>◆ CompleteResourceTokenAuth"| ID
     subgraph AC["Amazon Bedrock AgentCore"]
-        ID["Identity<br/>• 3LO 凭据提供者<br/>• 工作负载身份<br/>• Token Vault(用户 × agent)"]
+        ID["Identity<br/>• 3LO 凭据提供者(USER_FEDERATION)<br/>• 工作负载身份<br/>• Token Vault(用户 × agent)<br/><b>这里是 3LO,不是 OBO:没有交换,之后也不需要用户令牌</b>"]
     end
     B["用户浏览器<br/>登录 + 同意"] -->|"同意"| K[("Keycloak agent-bg<br/>外部身份提供商,不属于 AgentCore")]
     K -->|"授权码"| ID
@@ -57,6 +60,7 @@ flowchart LR
     ID -->|"访问令牌"| S
     S -->|"lambda:Invoke + Bearer"| D["模拟 ITSM API<br/>仅 IAM 可调用"]
     classDef agentcore fill:#fff7eb,stroke:#ff9900,stroke-width:2px,color:#0f1b2d
+    classDef obo fill:#ffe0b2,stroke:#e65100,stroke-width:4px,color:#0f1b2d
     classDef idp fill:#eef4ff,stroke:#2563eb,color:#0f1b2d
     classDef app fill:#ffffff,stroke:#94a3b8,color:#0f1b2d
     classDef down fill:#ecfdf3,stroke:#15803d,color:#0f1b2d
@@ -68,6 +72,16 @@ flowchart LR
     class D down
     class S risk
 ```
+
+**OBO 在哪里。** OBO 只在 PoC 1,图中橙色粗线那一段:网关出站 OAuth 向 AgentCore Identity 要令牌(①),Identity 到身份提供商用用户令牌做交换(RFC 8693,②),下游收到发给它自己、但仍带用户 `sub` 的令牌(③)。OBO 需要一张有效的用户令牌作为 `subject_token`,所以用户不在场的 PoC 2 里没有它;PoC 2 的令牌来自一次性的同意(3LO),并由 Token Vault 保管。
+
+| | PoC 1 | PoC 2 |
+|---|---|---|
+| 流程 | OBO 令牌交换 | 3LO 授权码 + Token Vault |
+| 凭据提供者 | `obo-test-keycloak`,带 OBO 配置 | `obo-test-bg-3lo`,没有 OBO 配置 |
+| 调用时需要用户令牌 | 需要,每次调用 | 不需要 |
+| 每次调用是否交换 | 是 | 否,Vault 取出已保存的令牌并刷新 |
+| 下游看到的 `azp` | `agent-app` | `agent-bg` |
 
 用到的 AgentCore 功能:
 
