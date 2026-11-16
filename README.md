@@ -1,5 +1,7 @@
 # AgentCore delegated-auth PoC
 
+English | [简体中文](README.zh-CN.md)
+
 Two proofs of concept for letting an agent act for a user on Amazon Bedrock AgentCore:
 
 1. **User present: OBO token exchange.** An agent calls a downstream API through AgentCore Gateway. The gateway exchanges the user's token for a downstream token on every request, so the downstream sees the real user.
