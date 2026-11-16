@@ -1,45 +1,23 @@
-flowchart TB
-    U2["User browser<br/>(login + consent, once)"]
-    subgraph setup["App side, set up once"]
-        APP["App<br/>verifies login, reads sub"]
-        T[("Task store<br/>task → user sub")]
-    end
+%%{init: {"flowchart": {"nodeSpacing": 18, "rankSpacing": 28, "padding": 8}, "themeVariables": {"fontSize": "13px"}}}%%
+flowchart LR
+    APP["App (user present, once)<br/>task → user sub"] -->|"◆ ForUserId · ◆ GetResourceOauth2Token<br/>◆ CompleteResourceTokenAuth"| ID
     subgraph AC["Amazon Bedrock AgentCore"]
-        subgraph ID["Identity"]
-            direction LR
-            CP["OAuth2 credential provider<br/>3LO (USER_FEDERATION)"]
-            WI["Workload identity<br/>obo-test-bg-agent<br/>allowed return URLs"]
-            V[("Token Vault<br/>per user × agent<br/>access + refresh tokens")]
-        end
+        ID["Identity<br/>• 3LO credential provider<br/>• Workload identity<br/>• Token Vault (user × agent)"]
     end
-    K2[("Keycloak, client agent-bg<br/>consent, scope itsm, session cap<br/>external IdP, not AgentCore")]
-    subgraph absent["User absent"]
-        S["Scheduler<br/>IAM role, the only holder of ForUserId<br/>user sub read from the task record"]
-        D2["Mock ITSM API (Lambda)<br/>IAM-only, no public endpoint"]
-        CT["CloudTrail<br/>caller + workload name,<br/>no user id"]
-    end
-    APP -->|"◆ GetWorkloadAccessTokenForUserId(sub)<br/>◆ GetResourceOauth2Token"| CP
-    CP -->|"authorization URL"| U2
-    U2 -->|"login + consent"| K2
-    K2 -->|"auth code callback"| V
-    APP -->|"◆ CompleteResourceTokenAuth(userId=sub)"| V
-    APP --> T
-    S -->|"◆ GetWorkloadAccessTokenForUserId(sub from task)<br/>◆ GetResourceOauth2Token"| V
-    V -->|"access token"| S
-    V -.->|"refresh at the IdP, until the session cap"| K2
-    S -->|"lambda:Invoke + Bearer user token"| D2
-    S -.-> CT
+    B["User browser<br/>login + consent"] -->|"consent"| K[("Keycloak agent-bg<br/>external IdP, not AgentCore")]
+    K -->|"auth code"| ID
+    ID -.->|"refresh, until the session cap"| K
+    S["Scheduler (IAM role)<br/>only holder of ForUserId<br/>CloudTrail: no user id"] -->|"◆ ForUserId(sub from task)<br/>◆ GetResourceOauth2Token"| ID
+    ID -->|"access token"| S
+    S -->|"lambda:Invoke + Bearer"| D["Mock ITSM API<br/>IAM-only"]
     classDef agentcore fill:#fff7eb,stroke:#ff9900,stroke-width:2px,color:#0f1b2d
     classDef idp fill:#eef4ff,stroke:#2563eb,color:#0f1b2d
     classDef app fill:#ffffff,stroke:#94a3b8,color:#0f1b2d
     classDef down fill:#ecfdf3,stroke:#15803d,color:#0f1b2d
     classDef risk fill:#fff1f0,stroke:#b42318,stroke-dasharray:5 4,color:#0f1b2d
-    class CP,WI,V agentcore
-    class K2 idp
-    class U2,APP,T app
-    class D2 down
-    class S,CT risk
     style AC fill:#fff3e0,stroke:#ff9900,stroke-width:2px,color:#7a4a00
-    style ID fill:#ffe8c2,stroke:#ff9900,color:#7a4a00
-    style setup fill:#f8fafc,stroke:#cbd5e1,color:#475569
-    style absent fill:#f8fafc,stroke:#cbd5e1,color:#475569
+    class ID agentcore
+    class K idp
+    class APP,B app
+    class D down
+    class S risk

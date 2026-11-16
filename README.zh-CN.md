@@ -18,76 +18,55 @@
 **PoC 1:用户在场,经网关做 OBO**
 
 ```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 18, "rankSpacing": 28, "padding": 8}, "themeVariables": {"fontSize": "13px"}}}%%
 flowchart LR
-    U[用户] -->|"登录,aud=agent-app"| C["Agent 客户端<br/>(MCP,只转发用户令牌)"]
+    U["用户"] -->|"登录,aud=agent-app"| C["Agent 客户端<br/>(只转发用户令牌)"]
     C -->|"tools/call + 用户令牌"| G
     subgraph AC["Amazon Bedrock AgentCore"]
-        G["Gateway<br/>• MCP 入口<br/>• 入站 CUSTOM_JWT 校验<br/>• OpenAPI 目标"]
-        I["Identity<br/>• OAuth2 凭据提供者<br/>• OBO:grantType TOKEN_EXCHANGE<br/>• ◆ GetResourceOauth2Token"]
-        G -->|"出站 OAuth:TOKEN_EXCHANGE"| I
+        G["Gateway<br/>• 入站 CUSTOM_JWT 校验<br/>• OpenAPI 目标"]
+        I["Identity<br/>• OAuth2 凭据提供者<br/>• OBO TOKEN_EXCHANGE · ◆ GetResourceOauth2Token"]
+        G -->|"出站 OAuth"| I
     end
-    I -->|"RFC 8693:subject_token = 用户令牌"| K[("Keycloak<br/>外部身份提供商,不属于 AgentCore")]
-    K -->|"新令牌,aud=itsm-api,sub 不变"| I
+    I <-->|"RFC 8693 交换"| K[("Keycloak<br/>外部身份提供商,不属于 AgentCore")]
     G -->|"Bearer,aud=itsm-api"| D["模拟 ITSM API<br/>(Lambda)"]
     classDef agentcore fill:#fff7eb,stroke:#ff9900,stroke-width:2px,color:#0f1b2d
     classDef idp fill:#eef4ff,stroke:#2563eb,color:#0f1b2d
     classDef app fill:#ffffff,stroke:#94a3b8,color:#0f1b2d
     classDef down fill:#ecfdf3,stroke:#15803d,color:#0f1b2d
+    classDef risk fill:#fff1f0,stroke:#b42318,stroke-dasharray:5 4,color:#0f1b2d
+    style AC fill:#fff3e0,stroke:#ff9900,stroke-width:2px,color:#7a4a00
     class G,I agentcore
     class K idp
     class U,C app
     class D down
-    style AC fill:#fff3e0,stroke:#ff9900,stroke-width:2px,color:#7a4a00
 ```
 
 **PoC 2:用户不在场,3LO + Token Vault**
 
 ```mermaid
-flowchart TB
-    U2["用户浏览器<br/>(登录 + 同意,仅一次)"]
-    subgraph setup["应用侧,安排任务时一次"]
-        APP["应用<br/>校验登录,读取 sub"]
-        T[("任务存储<br/>任务 → 用户 sub")]
-    end
+%%{init: {"flowchart": {"nodeSpacing": 18, "rankSpacing": 28, "padding": 8}, "themeVariables": {"fontSize": "13px"}}}%%
+flowchart LR
+    APP["应用(用户在场,仅一次)<br/>任务 → 用户 sub"] -->|"◆ ForUserId · ◆ GetResourceOauth2Token<br/>◆ CompleteResourceTokenAuth"| ID
     subgraph AC["Amazon Bedrock AgentCore"]
-        subgraph ID["Identity"]
-            direction LR
-            CP["OAuth2 凭据提供者<br/>3LO (USER_FEDERATION)"]
-            WI["工作负载身份<br/>obo-test-bg-agent<br/>允许的回调地址"]
-            V[("Token Vault<br/>按 用户 × agent 保存<br/>访问令牌 + 刷新令牌")]
-        end
+        ID["Identity<br/>• 3LO 凭据提供者<br/>• 工作负载身份<br/>• Token Vault(用户 × agent)"]
     end
-    K2[("Keycloak,客户端 agent-bg<br/>要求同意,scope itsm,会话上限<br/>外部身份提供商,不属于 AgentCore")]
-    subgraph absent["用户不在场"]
-        S["调度器<br/>IAM 角色,唯一持有 ForUserId 权限<br/>用户 sub 取自任务记录"]
-        D2["模拟 ITSM API (Lambda)<br/>仅 IAM 可调用,无公网入口"]
-        CT["CloudTrail<br/>记录调用方和工作负载名,<br/>不记用户 ID"]
-    end
-    APP -->|"◆ GetWorkloadAccessTokenForUserId(sub)<br/>◆ GetResourceOauth2Token"| CP
-    CP -->|"授权链接"| U2
-    U2 -->|"登录 + 同意"| K2
-    K2 -->|"授权码回调"| V
-    APP -->|"◆ CompleteResourceTokenAuth(userId=sub)"| V
-    APP --> T
-    S -->|"◆ GetWorkloadAccessTokenForUserId(任务中的 sub)<br/>◆ GetResourceOauth2Token"| V
-    V -->|"访问令牌"| S
-    V -.->|"到身份提供商刷新,直到会话上限"| K2
-    S -->|"lambda:Invoke + Bearer 用户令牌"| D2
-    S -.-> CT
+    B["用户浏览器<br/>登录 + 同意"] -->|"同意"| K[("Keycloak agent-bg<br/>外部身份提供商,不属于 AgentCore")]
+    K -->|"授权码"| ID
+    ID -.->|"刷新,直到会话上限"| K
+    S["调度器(IAM 角色)<br/>唯一持有 ForUserId<br/>CloudTrail:不记用户 ID"] -->|"◆ ForUserId(任务中的 sub)<br/>◆ GetResourceOauth2Token"| ID
+    ID -->|"访问令牌"| S
+    S -->|"lambda:Invoke + Bearer"| D["模拟 ITSM API<br/>仅 IAM 可调用"]
     classDef agentcore fill:#fff7eb,stroke:#ff9900,stroke-width:2px,color:#0f1b2d
     classDef idp fill:#eef4ff,stroke:#2563eb,color:#0f1b2d
     classDef app fill:#ffffff,stroke:#94a3b8,color:#0f1b2d
     classDef down fill:#ecfdf3,stroke:#15803d,color:#0f1b2d
     classDef risk fill:#fff1f0,stroke:#b42318,stroke-dasharray:5 4,color:#0f1b2d
-    class CP,WI,V agentcore
-    class K2 idp
-    class U2,APP,T app
-    class D2 down
-    class S,CT risk
     style AC fill:#fff3e0,stroke:#ff9900,stroke-width:2px,color:#7a4a00
-    style ID fill:#ffe8c2,stroke:#ff9900,color:#7a4a00
-    style setup fill:#f8fafc,stroke:#cbd5e1,color:#475569
-    style absent fill:#f8fafc,stroke:#cbd5e1,color:#475569
+    class ID agentcore
+    class K idp
+    class APP,B app
+    class D down
+    class S risk
 ```
 
 用到的 AgentCore 功能:
