@@ -13,31 +13,98 @@ Status: private, experimental. Not production code.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    subgraph present[User present: PoC 1]
-        U[User] -->|login, aud=agent-app| C[Agent client MCP]
-        C -->|tools/call + user token| G[AgentCore Gateway]
-        G -->|TOKEN_EXCHANGE| I1[AgentCore Identity]
-        I1 -->|RFC 8693| K[(Keycloak)]
-        G -->|Bearer aud=itsm-api| D[Downstream API]
-    end
-```
+Orange = an AgentCore feature (the groups are the AgentCore services). Blue = external identity provider. Green = downstream. Red dashed = the trust-critical caller and the audit gap. ◆ = an AgentCore API call.
+
+**PoC 1: user present, OBO through the gateway**
 
 ```mermaid
 flowchart LR
-    subgraph setup[User present, once: PoC 2]
-        U2[User browser] -->|login + consent, scope=itsm| K2[(Keycloak: client agent-bg)]
-        K2 -->|auth code callback| V[Token Vault: user x agent]
-        APP[App] -->|CompleteResourceTokenAuth userId=sub| V
-        APP -->|task record: task -> user sub| T[(Task store)]
+    U[User] -->|"login, aud=agent-app"| C["Agent client<br/>(MCP, forwards the user token only)"]
+    C -->|"tools/call + user token"| G
+    subgraph AC["Amazon Bedrock AgentCore"]
+        G["Gateway<br/>• MCP endpoint<br/>• inbound CUSTOM_JWT authorizer<br/>• OpenAPI target"]
+        I["Identity<br/>• OAuth2 credential provider<br/>• OBO: grantType TOKEN_EXCHANGE<br/>• ◆ GetResourceOauth2Token"]
+        G -->|"outbound OAuth: TOKEN_EXCHANGE"| I
     end
-    subgraph absent[User absent]
-        S[Scheduler role: only holder of ForUserId] -->|ForUserId sub from task| V
-        V -->|access token, refresh if needed| S
-        S -->|lambda:Invoke Bearer user token| D2[Downstream: IAM-only, no public endpoint]
-    end
+    I -->|"RFC 8693: subject_token = user token"| K[("Keycloak<br/>external IdP, not AgentCore")]
+    K -->|"new token, aud=itsm-api, same sub"| I
+    G -->|"Bearer, aud=itsm-api"| D["Mock ITSM API<br/>(Lambda)"]
+    classDef agentcore fill:#fff7eb,stroke:#ff9900,stroke-width:2px,color:#0f1b2d
+    classDef idp fill:#eef4ff,stroke:#2563eb,color:#0f1b2d
+    classDef app fill:#ffffff,stroke:#94a3b8,color:#0f1b2d
+    classDef down fill:#ecfdf3,stroke:#15803d,color:#0f1b2d
+    class G,I agentcore
+    class K idp
+    class U,C app
+    class D down
+    style AC fill:#fff3e0,stroke:#ff9900,stroke-width:2px,color:#7a4a00
 ```
+
+**PoC 2: user absent, 3LO + Token Vault**
+
+```mermaid
+flowchart TB
+    U2["User browser<br/>(login + consent, once)"]
+    subgraph setup["App side, set up once"]
+        APP["App<br/>verifies login, reads sub"]
+        T[("Task store<br/>task → user sub")]
+    end
+    subgraph AC["Amazon Bedrock AgentCore"]
+        subgraph ID["Identity"]
+            direction LR
+            CP["OAuth2 credential provider<br/>3LO (USER_FEDERATION)"]
+            WI["Workload identity<br/>obo-test-bg-agent<br/>allowed return URLs"]
+            V[("Token Vault<br/>per user × agent<br/>access + refresh tokens")]
+        end
+    end
+    K2[("Keycloak, client agent-bg<br/>consent, scope itsm, session cap<br/>external IdP, not AgentCore")]
+    subgraph absent["User absent"]
+        S["Scheduler<br/>IAM role, the only holder of ForUserId<br/>user sub read from the task record"]
+        D2["Mock ITSM API (Lambda)<br/>IAM-only, no public endpoint"]
+        CT["CloudTrail<br/>caller + workload name,<br/>no user id"]
+    end
+    APP -->|"◆ GetWorkloadAccessTokenForUserId(sub)<br/>◆ GetResourceOauth2Token"| CP
+    CP -->|"authorization URL"| U2
+    U2 -->|"login + consent"| K2
+    K2 -->|"auth code callback"| V
+    APP -->|"◆ CompleteResourceTokenAuth(userId=sub)"| V
+    APP --> T
+    S -->|"◆ GetWorkloadAccessTokenForUserId(sub from task)<br/>◆ GetResourceOauth2Token"| V
+    V -->|"access token"| S
+    V -.->|"refresh at the IdP, until the session cap"| K2
+    S -->|"lambda:Invoke + Bearer user token"| D2
+    S -.-> CT
+    classDef agentcore fill:#fff7eb,stroke:#ff9900,stroke-width:2px,color:#0f1b2d
+    classDef idp fill:#eef4ff,stroke:#2563eb,color:#0f1b2d
+    classDef app fill:#ffffff,stroke:#94a3b8,color:#0f1b2d
+    classDef down fill:#ecfdf3,stroke:#15803d,color:#0f1b2d
+    classDef risk fill:#fff1f0,stroke:#b42318,stroke-dasharray:5 4,color:#0f1b2d
+    class CP,WI,V agentcore
+    class K2 idp
+    class U2,APP,T app
+    class D2 down
+    class S,CT risk
+    style AC fill:#fff3e0,stroke:#ff9900,stroke-width:2px,color:#7a4a00
+    style ID fill:#ffe8c2,stroke:#ff9900,color:#7a4a00
+    style setup fill:#f8fafc,stroke:#cbd5e1,color:#475569
+    style absent fill:#f8fafc,stroke:#cbd5e1,color:#475569
+```
+
+AgentCore features used:
+
+| Feature | Service | PoC |
+|---|---|---|
+| MCP gateway, inbound `CUSTOM_JWT` authorizer | Gateway | 1 |
+| OpenAPI target with outbound OAuth `TOKEN_EXCHANGE` | Gateway | 1 |
+| OAuth2 credential provider with OBO config (RFC 8693, `actorTokenContent=NONE`) | Identity | 1 |
+| OAuth2 credential provider, 3LO (`USER_FEDERATION`) | Identity | 2 |
+| Workload identity with allowed return URLs | Identity | 2 |
+| Token Vault: tokens per user x agent, silent refresh | Identity | 2 |
+| `GetWorkloadAccessTokenForUserId` | Identity | 2 |
+| `GetResourceOauth2Token` | Identity | 1 (called by the gateway's service role), 2 |
+| `CompleteResourceTokenAuth` | Identity | 2 |
+
+Not AgentCore: Keycloak (issues the tokens, decides consent and the session cap), the IAM roles, the task store, the downstream API, CloudTrail. AgentCore Runtime, Memory, Policy (Cedar) and the `GetWorkloadAccessTokenForJWT` path are not used.
 
 | Pattern component | AgentCore mapping | Built here |
 |---|---|---|

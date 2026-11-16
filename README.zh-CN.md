@@ -13,31 +13,98 @@
 
 ## 架构
 
-```mermaid
-flowchart LR
-    subgraph present[用户在场:PoC 1]
-        U[用户] -->|登录,aud=agent-app| C[Agent 客户端 MCP]
-        C -->|tools/call + 用户令牌| G[AgentCore Gateway]
-        G -->|TOKEN_EXCHANGE| I1[AgentCore Identity]
-        I1 -->|RFC 8693| K[(Keycloak)]
-        G -->|Bearer aud=itsm-api| D[下游 API]
-    end
-```
+橙色 = AgentCore 的功能(分组框就是 AgentCore 的服务)。蓝色 = 外部身份提供商。绿色 = 下游。红色虚线 = 信任关键的调用方和审计缺口。◆ = 对 AgentCore 的 API 调用。
+
+**PoC 1:用户在场,经网关做 OBO**
 
 ```mermaid
 flowchart LR
-    subgraph setup[用户在场,仅一次:PoC 2]
-        U2[用户浏览器] -->|登录 + 同意,scope=itsm| K2[(Keycloak:客户端 agent-bg)]
-        K2 -->|授权码回调| V[Token Vault:用户 x agent]
-        APP[应用] -->|CompleteResourceTokenAuth userId=sub| V
-        APP -->|任务记录:任务 -> 用户 sub| T[(任务存储)]
+    U[用户] -->|"登录,aud=agent-app"| C["Agent 客户端<br/>(MCP,只转发用户令牌)"]
+    C -->|"tools/call + 用户令牌"| G
+    subgraph AC["Amazon Bedrock AgentCore"]
+        G["Gateway<br/>• MCP 入口<br/>• 入站 CUSTOM_JWT 校验<br/>• OpenAPI 目标"]
+        I["Identity<br/>• OAuth2 凭据提供者<br/>• OBO:grantType TOKEN_EXCHANGE<br/>• ◆ GetResourceOauth2Token"]
+        G -->|"出站 OAuth:TOKEN_EXCHANGE"| I
     end
-    subgraph absent[用户不在场]
-        S[调度器角色:唯一持有 ForUserId 的主体] -->|ForUserId,sub 取自任务| V
-        V -->|访问令牌,必要时先刷新| S
-        S -->|lambda:Invoke,Bearer 用户令牌| D2[下游:仅 IAM 可调用,无公网入口]
-    end
+    I -->|"RFC 8693:subject_token = 用户令牌"| K[("Keycloak<br/>外部身份提供商,不属于 AgentCore")]
+    K -->|"新令牌,aud=itsm-api,sub 不变"| I
+    G -->|"Bearer,aud=itsm-api"| D["模拟 ITSM API<br/>(Lambda)"]
+    classDef agentcore fill:#fff7eb,stroke:#ff9900,stroke-width:2px,color:#0f1b2d
+    classDef idp fill:#eef4ff,stroke:#2563eb,color:#0f1b2d
+    classDef app fill:#ffffff,stroke:#94a3b8,color:#0f1b2d
+    classDef down fill:#ecfdf3,stroke:#15803d,color:#0f1b2d
+    class G,I agentcore
+    class K idp
+    class U,C app
+    class D down
+    style AC fill:#fff3e0,stroke:#ff9900,stroke-width:2px,color:#7a4a00
 ```
+
+**PoC 2:用户不在场,3LO + Token Vault**
+
+```mermaid
+flowchart TB
+    U2["用户浏览器<br/>(登录 + 同意,仅一次)"]
+    subgraph setup["应用侧,安排任务时一次"]
+        APP["应用<br/>校验登录,读取 sub"]
+        T[("任务存储<br/>任务 → 用户 sub")]
+    end
+    subgraph AC["Amazon Bedrock AgentCore"]
+        subgraph ID["Identity"]
+            direction LR
+            CP["OAuth2 凭据提供者<br/>3LO (USER_FEDERATION)"]
+            WI["工作负载身份<br/>obo-test-bg-agent<br/>允许的回调地址"]
+            V[("Token Vault<br/>按 用户 × agent 保存<br/>访问令牌 + 刷新令牌")]
+        end
+    end
+    K2[("Keycloak,客户端 agent-bg<br/>要求同意,scope itsm,会话上限<br/>外部身份提供商,不属于 AgentCore")]
+    subgraph absent["用户不在场"]
+        S["调度器<br/>IAM 角色,唯一持有 ForUserId 权限<br/>用户 sub 取自任务记录"]
+        D2["模拟 ITSM API (Lambda)<br/>仅 IAM 可调用,无公网入口"]
+        CT["CloudTrail<br/>记录调用方和工作负载名,<br/>不记用户 ID"]
+    end
+    APP -->|"◆ GetWorkloadAccessTokenForUserId(sub)<br/>◆ GetResourceOauth2Token"| CP
+    CP -->|"授权链接"| U2
+    U2 -->|"登录 + 同意"| K2
+    K2 -->|"授权码回调"| V
+    APP -->|"◆ CompleteResourceTokenAuth(userId=sub)"| V
+    APP --> T
+    S -->|"◆ GetWorkloadAccessTokenForUserId(任务中的 sub)<br/>◆ GetResourceOauth2Token"| V
+    V -->|"访问令牌"| S
+    V -.->|"到身份提供商刷新,直到会话上限"| K2
+    S -->|"lambda:Invoke + Bearer 用户令牌"| D2
+    S -.-> CT
+    classDef agentcore fill:#fff7eb,stroke:#ff9900,stroke-width:2px,color:#0f1b2d
+    classDef idp fill:#eef4ff,stroke:#2563eb,color:#0f1b2d
+    classDef app fill:#ffffff,stroke:#94a3b8,color:#0f1b2d
+    classDef down fill:#ecfdf3,stroke:#15803d,color:#0f1b2d
+    classDef risk fill:#fff1f0,stroke:#b42318,stroke-dasharray:5 4,color:#0f1b2d
+    class CP,WI,V agentcore
+    class K2 idp
+    class U2,APP,T app
+    class D2 down
+    class S,CT risk
+    style AC fill:#fff3e0,stroke:#ff9900,stroke-width:2px,color:#7a4a00
+    style ID fill:#ffe8c2,stroke:#ff9900,color:#7a4a00
+    style setup fill:#f8fafc,stroke:#cbd5e1,color:#475569
+    style absent fill:#f8fafc,stroke:#cbd5e1,color:#475569
+```
+
+用到的 AgentCore 功能:
+
+| 功能 | 服务 | PoC |
+|---|---|---|
+| MCP 网关、入站 `CUSTOM_JWT` 校验 | Gateway | 1 |
+| OpenAPI 目标,出站 OAuth `TOKEN_EXCHANGE` | Gateway | 1 |
+| 带 OBO 配置的 OAuth2 凭据提供者(RFC 8693,`actorTokenContent=NONE`) | Identity | 1 |
+| OAuth2 凭据提供者,3LO(`USER_FEDERATION`) | Identity | 2 |
+| 工作负载身份与允许的回调地址 | Identity | 2 |
+| Token Vault:按用户 x agent 保存令牌,静默刷新 | Identity | 2 |
+| `GetWorkloadAccessTokenForUserId` | Identity | 2 |
+| `GetResourceOauth2Token` | Identity | 1(由网关服务角色调用)、2 |
+| `CompleteResourceTokenAuth` | Identity | 2 |
+
+不属于 AgentCore:Keycloak(签发令牌,决定同意页和会话上限)、IAM 角色、任务存储、下游 API、CloudTrail。没有用到 AgentCore Runtime、Memory、Policy(Cedar)和 `GetWorkloadAccessTokenForJWT` 路径。
 
 | 模式中的组件 | AgentCore 对应 | 本仓库是否实现 |
 |---|---|---|
