@@ -99,6 +99,14 @@ AgentCore features used:
 
 Not AgentCore: Keycloak (issues the tokens, decides consent and the session cap), the IAM roles, the task store, the downstream API, CloudTrail. AgentCore Runtime, Memory, Policy (Cedar) and the `GetWorkloadAccessTokenForJWT` path are not used.
 
+**AWS deployment view (us-west-2)**
+
+[![AWS deployment architecture](docs/architecture-aws.png)](docs/architecture-aws.svg)
+
+Everything runs in one account and one region. Keycloak stands in for the enterprise IdP on a single EC2 instance behind CloudFront (its security group admits only CloudFront origin traffic; there is no SSH and administration goes through Systems Manager). The mock downstream is a Lambda with no public endpoint. The gateway target of PoC 1 currently points at an endpoint that was removed, so only PoC 2 runs end to end in this deployment; the picture marks that. Click the image for the vector version.
+
+**Pattern → AgentCore mapping**
+
 | Pattern component | AgentCore mapping | Built here |
 |---|---|---|
 | Per-user auth anchor | IdP session + AgentCore workload identity | yes |
@@ -118,7 +126,7 @@ poc/          kc_check.py   manual Keycloak token exchange and direct downstream
               cdp_login.mjs drives a Chrome (CDP) through login + consent for PoC 2 setup
 downstream/   index.mjs     mock ITSM API (Lambda): verifies JWT iss/exp/aud/signature, returns the caller's data
 scripts/      keycloak-setup.sh, cleanup.sh
-docs/         setup.md, results.md
+docs/         setup.md, results.md, architecture-aws.svg / .png
 ```
 
 ## Run

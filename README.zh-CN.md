@@ -99,6 +99,14 @@ flowchart LR
 
 不属于 AgentCore:Keycloak(签发令牌,决定同意页和会话上限)、IAM 角色、任务存储、下游 API、CloudTrail。没有用到 AgentCore Runtime、Memory、Policy(Cedar)和 `GetWorkloadAccessTokenForJWT` 路径。
 
+**AWS 部署视图(us-west-2)**
+
+[![AWS 部署架构](docs/architecture-aws.png)](docs/architecture-aws.svg)
+
+全部资源在同一个账号、同一个区域。Keycloak 在一台 EC2 上充当企业身份提供商,前面是 CloudFront(安全组只放行 CloudFront 的回源流量,没有 SSH,运维走 Systems Manager)。模拟下游是一个没有公网入口的 Lambda。PoC 1 的网关目标目前指向一个已删除的端点,所以这套部署里只有 PoC 2 能完整跑通,图上已标出。点击图片可打开矢量版。
+
+**模式 → AgentCore 对照**
+
 | 模式中的组件 | AgentCore 对应 | 本仓库是否实现 |
 |---|---|---|
 | 每用户认证锚点 | 身份提供商会话 + AgentCore 工作负载身份 | 是 |
@@ -118,7 +126,7 @@ poc/          kc_check.py   手工做 Keycloak 令牌交换,并直接检查下�
               cdp_login.mjs 用 Chrome(CDP)完成 PoC 2 的登录与同意页
 downstream/   index.mjs     模拟 ITSM API(Lambda):校验 JWT 的 iss / exp / aud / 签名,只返回调用者自己的数据
 scripts/      keycloak-setup.sh、cleanup.sh
-docs/         setup.md(搭建)、results.md(结果)
+docs/         setup.md(搭建)、results.md(结果)、architecture-aws.svg / .png(部署图)
 ```
 
 ## 运行
