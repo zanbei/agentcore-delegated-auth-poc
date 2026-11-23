@@ -32,7 +32,7 @@ Keycloak's standard token exchange narrows `aud` and `scope` and does not write 
 | E3 alice's offline refresh token, refreshed later | 200 | alice, same shape as when she is present; only `sid` differs |
 | E4 alice revokes the offline token | 200 | refresh fails, but an access token already issued stays valid until it expires (900 s here) |
 
-Mitigation for E2: set `allowedClients` on the gateway's inbound authorizer. Not applied in the run.
+Mitigation for E2: restrict clients on the gateway's inbound authorizer. Not applied in this run. v1 tested a custom-claim rule on `azp` and it blocked another client's token (`results-v1.md`, P2). `allowedClients` was not tested.
 
 ## PoC 2: 3LO + Token Vault (user absent)
 

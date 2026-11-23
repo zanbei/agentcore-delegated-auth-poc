@@ -10,6 +10,7 @@ Two proofs of concept for letting an agent act for a user on Amazon Bedrock Agen
 The second PoC simulates a pattern from workspace platforms: a per-user authentication anchor, session forwarding to workspaces, and a server-held refresh credential that lets unattended automations run until a hard expiry. This repo maps that pattern onto AgentCore and measures where it holds and where it leaks.
 
 Status: private, experimental. Not production code.
+v1 (in progress, Chinese only): a fuller design and its checks are in `docs/design.zh-CN.md`, `docs/results-v1.md` and `v1/`. Not everything in the design is built; the results file says what was tested.
 
 ## Architecture
 
@@ -147,7 +148,7 @@ python3 poc/bg3lo.py later         # after the token lifespan, then after the se
 
 - OBO works for a present user: the downstream sees the same `sub` with `aud` rewritten, and each user gets only their own data. The agent client never holds the downstream credential.
 - Keycloak's standard token exchange does not write an `act` claim. The downstream can only tell an agent made the call from `azp`. Writing `act` needs Keycloak's preview delegation feature, which requires per-session user consent and so does not fit unattended runs.
-- Without a user token, an agent's own client-credentials token is accepted by the gateway unless `allowedClients` restricts it.
+- Without a user token, an agent's own client-credentials token is accepted by the gateway. An inbound restriction has to block it. v1 tested a custom-claim rule on `azp` (`docs/results-v1.md`); `allowedClients` was not tested.
 - Token Vault supports "consent once, run later": silent refresh works inside the IdP session limit, and after the limit the Vault returns no token and a new authorization URL.
 - `GetWorkloadAccessTokenForUserId` takes an unverified user id string. Whoever holds that IAM permission can fetch the token of any user who has already consented. The scope of that permission is the blast radius.
 - CloudTrail records the `ForUserId` call but not the user id passed. The application has to log task, user and time itself.

@@ -10,6 +10,7 @@
 第二个 PoC 模拟的是工作区类平台里常见的一种模式:每用户一个认证锚点、把会话转发给各个工作区、再由服务端保管一份刷新凭据,让无人值守的自动任务在硬过期之前可以运行。本仓库把这套模式映射到 AgentCore,并测出它哪里成立、哪里有缺口。
 
 状态:私有、实验性质,不是生产代码。
+v1(进行中):更完整的设计和对应的验证在 `docs/design.zh-CN.md`、`docs/results-v1.md` 和 `v1/`。设计里不是每一项都已实现,哪些测过见结果文件。
 
 ## 架构
 
@@ -147,7 +148,7 @@ python3 poc/bg3lo.py later         # 分别在访问令牌过期后、会话上�
 
 - 用户在场时 OBO 成立:下游看到的 `sub` 不变,`aud` 被改写,每个用户只拿到自己的数据。agent 客户端从不持有下游凭据。
 - Keycloak 的标准令牌交换不写 `act` 声明,下游只能通过 `azp` 判断这是 agent 的调用。要写入 `act` 需要 Keycloak 的预览功能"委托",它要求每个会话都由用户同意,不适合无人值守的场景。
-- 没有用户令牌时,如果不限制 `allowedClients`,网关会接受 agent 自己的 client-credentials 令牌。
+- 没有用户令牌时,网关会接受 agent 自己的 client-credentials 令牌,需要在入站做限制。v1 测了按 `azp` 的自定义声明规则(见 `docs/results-v1.md`),`allowedClients` 没有测。
 - Token Vault 能做到"同意一次,稍后运行":在身份提供商的会话上限之内会静默刷新;超过上限后,Vault 不再返回令牌,而是返回新的授权链接。
 - `GetWorkloadAccessTokenForUserId` 接受的是未经验证的用户 ID 字符串。谁持有这个 IAM 权限,谁就能取出任何已经同意过的用户的令牌。这个权限的授予范围就是爆炸半径。
 - CloudTrail 会记录 `ForUserId` 的调用,但不记录传入的用户 ID。应用必须自己记录"任务、用户、时间"。
