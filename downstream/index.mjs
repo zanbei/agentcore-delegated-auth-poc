@@ -57,5 +57,13 @@ export const handler = async (event) => {
     login_age_s: c.auth_time ? Math.round(Date.now() / 1000 - c.auth_time) : null,
   };
   console.log(JSON.stringify({ accepted: seen }));
+  // A write operation, so the background-gateway policy has something to forbid (v1, P2).
+  const path = event.rawPath || event.requestContext?.http?.path || '';
+  const method = event.requestContext?.http?.method || 'GET';
+  const approve = path.match(/^\/incidents\/([^/]+)\/approve$/);
+  if (method === 'POST' && approve) {
+    console.log(JSON.stringify({ approved: approve[1], by: seen.preferred_username, azp: seen.azp }));
+    return reply(200, { approved: approve[1], caller: seen });
+  }
   return reply(200, { caller: seen, incidents: INCIDENTS[c.preferred_username] ?? [] });
 };

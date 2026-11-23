@@ -3,7 +3,7 @@
 // Prints the final URL's query keys and session-related values (no tokens are involved).
 const [authUrl, returnPrefix] = process.argv.slice(2);
 const CDP = 'http://127.0.0.1:9222';
-const tab = await (await fetch(`${CDP}/json/new?${encodeURI(authUrl)}`, { method: 'PUT' })).json();
+const tab = await (await fetch(`${CDP}/json/new?about:blank`, { method: 'PUT' })).json();
 const ws = new WebSocket(tab.webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let id = 0;
@@ -18,9 +18,13 @@ const send = (method, params = {}) =>
     pending.set(i, resolve);
     ws.send(JSON.stringify({ id: i, method, params }));
   });
+// start from a clean browser so an earlier user's SSO cookie cannot sign in as the wrong user
 const ev = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true })).result?.result?.value;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+await send('Network.enable');
+await send('Network.clearBrowserCookies');
+await send('Page.navigate', { url: authUrl });
 const steps = [];
 let filled = false;
 let consented = false;
