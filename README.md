@@ -9,7 +9,7 @@ Two proofs of concept for letting an agent act for a user on Amazon Bedrock Agen
 
 The second PoC simulates a pattern from workspace platforms: a per-user authentication anchor, session forwarding to workspaces, and a server-held refresh credential that lets unattended automations run until a hard expiry. This repo maps that pattern onto AgentCore and measures where it holds and where it leaks.
 
-Status: private, experimental. Not production code.
+Status: experimental. Not production code. License: MIT-0 (see `LICENSE`).
 v1 (in progress, Chinese only): a fuller design and its checks are in `docs/design.zh-CN.md`, `docs/results-v1.md` and `v1/`. Not everything in the design is built; the results file says what was tested.
 
 ## Architecture
@@ -156,5 +156,8 @@ python3 poc/bg3lo.py later         # after the token lifespan, then after the se
 ## Security notes
 
 - Secrets (`secrets.env`, `.env`) are git-ignored. Test users use the password grant for convenience; do not do that in production.
-- The mock downstream has no public endpoint and verifies tokens itself. Keycloak runs in `start-dev` mode behind a CDN that blocks the admin paths. Treat both as test scaffolding.
+- The first PoCs' mock downstream has no public endpoint and verifies tokens itself. Keycloak runs in `start-dev` mode behind a CDN that blocks the admin paths. Treat both as test scaffolding.
+- The v1 code (`v1/`) is test scaffolding and is not hardened. The automation Runtime agent keeps test-only modes (`probe`, and a `gateway` mode that takes tool names and arguments from the caller). The Runtime uses the PUBLIC network mode, its execution role uses a name-prefix wildcard on the workload identity and can read the credential provider's client secret, and the v1 downstream is a token-gated public HTTP API. Remove or restrict these before any real use.
+- v1 has no cleanup script yet. Its resources are named `obo-test-v1*` or `obo_test_v1*`; delete them by hand when you are done.
+- Every script creates or changes resources in your own AWS account and identity provider. Read it before you run it, and do not point it at an account you do not own.
 - Run `scripts/cleanup.sh` (after reading it) when you are done; the test resources keep running and cost money.
